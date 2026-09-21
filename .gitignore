@@ -1,3 +1,11 @@
+# Зависимости
+node_modules/
+
+# Сборка frontend
+frontend/dist/
+
+
+#PYTHON
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
