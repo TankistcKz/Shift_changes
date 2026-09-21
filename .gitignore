@@ -3,6 +3,7 @@ node_modules/
 
 # Сборка frontend
 frontend/dist/
+frontend/.vite/
 
 
 #PYTHON
