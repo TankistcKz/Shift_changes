@@ -155,7 +155,7 @@ def list_requests(db: Session, status: str | None = None) -> list[ExchangeReques
         if status not in {"pending", "approved", "declined"}:
             raise HTTPException(
                 status_code=400,
-                detail="status должен быть one из: pending, approved, declined",
+                detail="status должен быть один из: pending, approved, declined",
             )
         statement = statement.where(ExchangeRequest.status == status)
     return list(db.scalars(statement))
