@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from ..auth import get_current_user
 from ..crud import get_history_record, list_history
 from ..database import get_db
 from ..schemas import ReplacementRecordOut
 
-router = APIRouter(prefix="/api/history", tags=["history"])
+router = APIRouter(
+    prefix="/api/history",
+    tags=["history"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("", response_model=list[ReplacementRecordOut])

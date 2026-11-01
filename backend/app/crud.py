@@ -149,7 +149,11 @@ def delete_shift(db: Session, shift_id: int) -> None:
 
 
 # Exchange requests
-def list_requests(db: Session, status: str | None = None) -> list[ExchangeRequest]:
+def list_requests(
+    db: Session,
+    status: str | None = None,
+    requester_id: int | None = None,
+) -> list[ExchangeRequest]:
     statement = select(ExchangeRequest).order_by(ExchangeRequest.id)
     if status:
         if status not in {"pending", "approved", "declined"}:
@@ -158,6 +162,10 @@ def list_requests(db: Session, status: str | None = None) -> list[ExchangeReques
                 detail="status должен быть один из: pending, approved, declined",
             )
         statement = statement.where(ExchangeRequest.status == status)
+    if requester_id is not None:
+        statement = statement.where(
+            ExchangeRequest.requester_id == requester_id
+        )
     return list(db.scalars(statement))
 
 
@@ -165,8 +173,9 @@ def get_request(db: Session, request_id: int) -> ExchangeRequest:
     return _get_request_or_404(db, request_id)
 
 
-def create_request(db: Session, data: ExchangeRequestCreate) -> ExchangeRequest:
-    requester = _get_person_or_404(db, data.requester_id)
+def create_request(
+    db: Session, data: ExchangeRequestCreate, requester: Person
+) -> ExchangeRequest:
     shift = _get_shift_or_404(db, data.shift_id)
     target_shift = _get_shift_or_404(db, data.target_shift_id)
 
@@ -175,15 +184,15 @@ def create_request(db: Session, data: ExchangeRequestCreate) -> ExchangeRequest:
             status_code=400,
             detail="Нельзя обменяться сменой с самой собой",
         )
-    if shift.person_id != requester.id:
-        raise HTTPException(
-            status_code=400,
-            detail="Запросить обмен можно только за собственной смену",
-        )
     if requester.role != "guard":
         raise HTTPException(
-            status_code=400,
+            status_code=403,
             detail="Запрос на обмен может создавать только дежурный",
+        )
+    if shift.person_id != requester.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Запросить обмен можно только за собственной смену",
         )
     if target_shift.person_id == requester.id:
         raise HTTPException(
@@ -205,7 +214,7 @@ def create_request(db: Session, data: ExchangeRequestCreate) -> ExchangeRequest:
 
 
 def approve_request(
-    db: Session, request_id: int, approved_by_id: int | None = None
+    db: Session, request_id: int, approved_by: Person
 ) -> ExchangeRequest:
     request = _get_request_or_404(db, request_id)
     if request.status != "pending":
@@ -214,23 +223,12 @@ def approve_request(
             detail="Подтвердить можно только запрос в статусе pending",
         )
 
-    if approved_by_id is None:
-        approver = db.scalar(select(Person).where(Person.role == "senior"))
-        if approver is None:
-            raise HTTPException(
-                status_code=400,
-                detail="В системе нет старшего для подтверждения",
-            )
-        approved_by_id = approver.id
-    else:
-        approver = db.get(Person, approved_by_id)
-        if approver is None:
-            raise _not_found("Старший")
-        if approver.role != "senior":
-            raise HTTPException(
-                status_code=400,
-                detail="Подтверждать запрос может только старший",
-            )
+    if approved_by.role != "senior":
+        raise HTTPException(
+            status_code=403,
+            detail="Подтверждать запрос может только старший",
+        )
+    approved_by_id = approved_by.id
 
     shift = _get_shift_or_404(db, request.shift_id)
     target_shift = _get_shift_or_404(db, request.target_shift_id)

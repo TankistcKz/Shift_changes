@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
@@ -9,15 +9,27 @@ from .models import (
     Person,
     ReplacementRecord,
     Shift,
+    User,
 )
+from .security import hash_password
 
-SENIOR = Person(name="Александр Волков", role="senior")
-GUARDS = [
-    Person(name="Мария Соколова", role="guard"),
-    Person(name="Дмитрий Козлов", role="guard"),
-    Person(name="Елена Морозова", role="guard"),
-    Person(name="Иван Петров", role="guard"),
-    Person(name="Ольга Белова", role="guard"),
+DEMO_PASSWORD = "demo12345"
+DEMO_ACCOUNTS = {
+    "volkov": "Александр Волков",
+    "sokolova": "Мария Соколова",
+    "kozlov": "Дмитрий Козлов",
+    "morozova": "Елена Морозова",
+    "petrov": "Иван Петров",
+    "belova": "Ольга Белова",
+}
+
+SENIOR_NAME = "Александр Волков"
+GUARD_NAMES = [
+    "Мария Соколова",
+    "Дмитрий Козлов",
+    "Елена Морозова",
+    "Иван Петров",
+    "Ольга Белова",
 ]
 
 SAMPLE_REQUESTS = [
@@ -52,7 +64,8 @@ SAMPLE_HISTORY = [
 
 def _check_tables() -> None:
     inspector = inspect(engine)
-    if "persons" not in inspector.get_table_names():
+    tables = set(inspector.get_table_names())
+    if not {"persons", "users", "refresh_tokens"} <= tables:
         raise RuntimeError(
             "Таблицы не созданы. Сначала выполните: alembic upgrade head"
         )
@@ -75,66 +88,106 @@ def build_shifts(year: int, month: int, guards: list[Person]) -> list[Shift]:
     return shifts
 
 
+def _ensure_demo_users(
+    db: Session, persons_by_name: dict[str, Person]
+) -> int:
+    users = list(db.scalars(select(User)))
+    existing_logins = {user.login for user in users}
+    used_person_ids = {user.person_id for user in users}
+
+    created = 0
+    for login, name in DEMO_ACCOUNTS.items():
+        person = persons_by_name.get(name)
+        if (
+            login in existing_logins
+            or person is None
+            or person.id in used_person_ids
+        ):
+            continue
+        db.add(
+            User(
+                person_id=person.id,
+                login=login,
+                password_hash=hash_password(DEMO_PASSWORD),
+            )
+        )
+        created += 1
+    return created
+
+
 def seed() -> None:
     _check_tables()
     db: Session = SessionLocal()
 
-    if db.scalar(select(Person).limit(1)):
-        print("База уже заполнена, пропускаю seed.")
+    try:
+        if db.scalar(select(Person).limit(1)):
+            persons = list(db.scalars(select(Person)))
+            created = _ensure_demo_users(
+                db, {person.name: person for person in persons}
+            )
+            db.commit()
+            print(
+                "База уже заполнена, добавлено демо-аккаунтов: "
+                f"{created}. Пароль демо-аккаунтов: {DEMO_PASSWORD}"
+            )
+            return
+
+        senior = Person(name=SENIOR_NAME, role="senior")
+        guards = [Person(name=name, role="guard") for name in GUARD_NAMES]
+        db.add(senior)
+        db.add_all(guards)
+        db.flush()
+
+        all_persons = [senior] + guards
+        by_name = {person.name: person for person in all_persons}
+        created_users = _ensure_demo_users(db, by_name)
+
+        now = datetime.now()
+        shifts = build_shifts(now.year, now.month, guards)
+        db.add_all(shifts)
+        db.flush()
+        shift_by_day = {shift.date.day: shift for shift in shifts}
+
+        for item in SAMPLE_REQUESTS:
+            requester = by_name[item["requester"]]
+            db.add(
+                ExchangeRequest(
+                    requester_id=requester.id,
+                    shift_id=shift_by_day[item["shift_day"]].id,
+                    target_shift_id=shift_by_day[item["target_day"]].id,
+                    reason=item["reason"],
+                    status=item["status"],
+                    created_at=now - timedelta(days=2),
+                )
+            )
+
+        for item in SAMPLE_HISTORY:
+            shift = shift_by_day[item["shift_day"]]
+            from_person = by_name[item["from"]]
+            to_person = by_name[item["to"]]
+            shift.person_id = to_person.id
+            db.add(
+                ReplacementRecord(
+                    shift_id=shift.id,
+                    from_person_id=from_person.id,
+                    to_person_id=to_person.id,
+                    approved_by_id=senior.id,
+                    approved_at=now - timedelta(days=3),
+                )
+            )
+
+        db.commit()
+        print(
+            "Seed завершён: "
+            f"{len(all_persons)} пользователей, "
+            f"{created_users} учётных записей, "
+            f"{len(shifts)} смен, "
+            f"{len(SAMPLE_REQUESTS)} запросов, "
+            f"{len(SAMPLE_HISTORY)} записей истории. "
+            f"Пароль демо-аккаунтов: {DEMO_PASSWORD}"
+        )
+    finally:
         db.close()
-        return
-
-    db.add(SENIOR)
-    db.add_all(GUARDS)
-    db.flush()
-    all_persons = [SENIOR] + GUARDS
-    guards = GUARDS
-    by_name = {person.name: person for person in all_persons}
-    senior = SENIOR
-
-    now = datetime.now()
-    shifts = build_shifts(now.year, now.month, guards)
-    db.add_all(shifts)
-    db.flush()
-    shift_by_day = {shift.date.day: shift for shift in shifts}
-
-    for item in SAMPLE_REQUESTS:
-        requester = by_name[item["requester"]]
-        db.add(
-            ExchangeRequest(
-                requester_id=requester.id,
-                shift_id=shift_by_day[item["shift_day"]].id,
-                target_shift_id=shift_by_day[item["target_day"]].id,
-                reason=item["reason"],
-                status=item["status"],
-                created_at=now - timedelta(days=2),
-            )
-        )
-
-    for item in SAMPLE_HISTORY:
-        shift = shift_by_day[item["shift_day"]]
-        from_person = by_name[item["from"]]
-        to_person = by_name[item["to"]]
-        shift.person_id = to_person.id
-        db.add(
-            ReplacementRecord(
-                shift_id=shift.id,
-                from_person_id=from_person.id,
-                to_person_id=to_person.id,
-                approved_by_id=senior.id,
-                approved_at=now - timedelta(days=3),
-            )
-        )
-
-    db.commit()
-    db.close()
-    print(
-        "Seed завершён: "
-        f"{len(all_persons)} пользователей, "
-        f"{len(shifts)} смен, "
-        f"{len(SAMPLE_REQUESTS)} запросов, "
-        f"{len(SAMPLE_HISTORY)} записей истории."
-    )
 
 
 if __name__ == "__main__":

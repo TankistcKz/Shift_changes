@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
+from ..auth import get_current_user, require_senior
 from ..crud import (
     create_person,
     delete_person,
@@ -9,9 +10,14 @@ from ..crud import (
     update_person,
 )
 from ..database import get_db
+from ..models import User
 from ..schemas import PersonCreate, PersonOut, PersonUpdate
 
-router = APIRouter(prefix="/api/persons", tags=["persons"])
+router = APIRouter(
+    prefix="/api/persons",
+    tags=["persons"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("", response_model=list[PersonOut])
@@ -20,7 +26,11 @@ def read_persons(db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=PersonOut, status_code=status.HTTP_201_CREATED)
-def add_person(data: PersonCreate, db: Session = Depends(get_db)):
+def add_person(
+    data: PersonCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_senior),
+):
     return create_person(db, data)
 
 
@@ -31,12 +41,19 @@ def read_person(person_id: int, db: Session = Depends(get_db)):
 
 @router.patch("/{person_id}", response_model=PersonOut)
 def modify_person(
-    person_id: int, data: PersonUpdate, db: Session = Depends(get_db)
+    person_id: int,
+    data: PersonUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_senior),
 ):
     return update_person(db, person_id, data)
 
 
 @router.delete("/{person_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_person(person_id: int, db: Session = Depends(get_db)):
+def remove_person(
+    person_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_senior),
+):
     delete_person(db, person_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -43,8 +43,8 @@
 
 ## Демо-доступы
 
-Аутентификация демонстрационная и выполняется на frontend по mock-данным, без
-обращения к backend. Пароль у всех демо-учётных записей — `demo123`.
+Аутентификация на frontend демонстрационная и выполняется по mock-данным, без
+обращения к backend. Пароль у всех frontend-демо-учётных записей — `demo123`.
 
 | Логин      | Роль     | Сотрудник         |
 | ---------- | -------- | ----------------- |
@@ -59,12 +59,18 @@
 любой дежурный, например `petrov`. Пароли хранятся в mock-данных frontend и не
 предназначены для реального использования.
 
+Backend-seed создаёт те же логины (`volkov`, `sokolova`, `kozlov`, `morozova`,
+`petrov`, `belova`) с общим паролем `demo12345`. Пароли в backend хранятся в виде
+Argon2id-хешей. Frontend пока не вызывает backend-auth, поэтому его демо-пароль
+остаётся прежним (`demo123`) до следующей лабораторной.
+
 ## Технологический стек
 
 - Frontend: React + TypeScript, сборка Vite, React Router, MUI
 - Backend: Python + FastAPI, PostgreSQL + SQLAlchemy, Alembic
+- Аутентификация backend: Argon2id, JWT access-токены, opaque refresh-токены с ротацией и отзывом
 - Данные frontend: асинхронный mock API (`frontend/src/shared/api`), backend пока не подключён
-- Аутентификация frontend: демонстрационная, логин и пароль из mock-данных; backend-аутентификация не реализована
+- Аутентификация frontend: остаётся демонстрационной до следующей лабораторной; backend-аутентификация уже реализована, но UI её пока не вызывает
 
 ## Frontend: архитектура (упрощённый Feature-Sliced Design)
 
@@ -141,18 +147,43 @@ PostgreSQL, таблицы создаются миграциями Alembic (`bac
 | Таблица            | Поля и связи                                                                  |
 | ------------------ | ----------------------------------------------------------------------------- |
 | `persons`          | id (PK), name, role (`senior`/`guard`).                                       |
+| `users`            | id (PK), person_id (FK → persons, CASCADE, UNIQUE), login (UNIQUE), password_hash (Argon2id), is_active, created_at. |
+| `refresh_tokens`   | id (PK), user_id (FK → users, CASCADE), token_hash (SHA-256, UNIQUE), created_at, expires_at, revoked_at. |
 | `shifts`           | id (PK), date, start_time, end_time, person_id (FK → persons, RESTRICT).      |
 | `exchange_requests`| id (PK), requester_id (FK → persons), shift_id (FK → shifts), target_shift_id (FK → shifts), reason, status (`pending`/`approved`/`declined`), created_at. |
 | `replacement_history` | id (PK), shift_id (FK → shifts), from_person_id (FK → persons), to_person_id (FK → persons), approved_by_id (FK → persons), approved_at. |
 
-Связи: у пользователя много смен и созданных запросов; смена принадлежит
-одному пользователю; запрос ссылается на две смены; запись истории фиксирует
-замену на конкретной смене и подтвердившего её старшего.
+Связи: у сотрудника (`persons`) может быть одна учётная запись (`users`);
+у неё много refresh-токенов; у сотрудника много смен и созданных запросов;
+смена принадлежит одному сотруднику; запрос ссылается на две смены; запись
+истории фиксирует замену на конкретной смене и подтвердившего её старшего.
 
 Бизнес-правила: запрос создаёт только дежурный за свою смену; подтвердить
 может только старший и только запрос в статусе `pending`; при подтверждении
 в одной транзакции меняются владельцы обеих смен и добавляются две записи
 в `replacement_history`.
+
+## Backend: аутентификация и права
+
+- Пароли хранятся только в виде Argon2id-хешей (`pwdlib[argon2]`), исходный
+  пароль в БД не сохраняется.
+- `POST /api/auth/register` создаёт сотрудника с ролью `guard` и учётную
+  запись. Самостоятельно зарегистрироваться старшим нельзя.
+- `POST /api/auth/login` проверяет логин и пароль и возвращает пару токенов.
+  Access-токен — JWT HS256 на 15 минут, refresh-токен — случайная строка на
+  7 дней; в БД хранится только SHA-256-хеш refresh-токена.
+- `POST /api/auth/refresh` проверяет срок и статус refresh-токена, отзывает
+  старый токен и выдаёт новую пару (ротация). Неверный, истёкший или уже
+  отозванный токен отклоняется с `401`.
+- `POST /api/auth/logout` требует access-токен и отзывает refresh-токен
+  текущей сессии. `GET /api/auth/me` возвращает текущего пользователя.
+- Все доменные маршруты (`/api/persons`, `/api/shifts`, `/api/requests`,
+  `/api/history`) требуют `Authorization: Bearer <access-token>`.
+- Дежурный видит только свои запросы и может удалить только свой запрос.
+  Старший видит все запросы и может подтверждать/отклонять их. Создание,
+  изменение и удаление сотрудников и смен доступны только старшему.
+- `requester_id` и `approved_by_id` больше не принимаются от клиента: они
+  берутся из проверенного access-токена.
 
 ## Backend: структура
 
@@ -162,11 +193,13 @@ backend/
     main.py             # FastAPI, CORS, подключение роутеров
     config.py           # настройки (.env через pydantic-settings)
     database.py         # engine, SessionLocal, Base, get_db
-    models.py           # сущности SQLAlchemy
-    schemas.py          # Pydantic-схемы валидации
+    models.py           # сущности SQLAlchemy, включая users и refresh_tokens
+    schemas.py          # Pydantic-схемы валидации и ответов
+    security.py         # Argon2id, JWT, генерация и хеширование refresh-токенов
+    auth.py             # регистрация, вход, refresh, logout, проверка прав
     crud.py             # операции с данными и бизнес-логика
-    seed.py             # загрузка демо-данных
-    routers/            # API: persons, shifts, requests, history
+    seed.py             # загрузка демо-данных и демо-учётных записей
+    routers/            # API: auth, persons, shifts, requests, history
   alembic/             # миграции БД
   tests/               # pytest-тесты
   docker-compose.yml   # PostgreSQL
@@ -189,6 +222,15 @@ docker compose up -d db
 ```bash
 cp .env.example .env
 ```
+
+Обязательно замените `JWT_SECRET_KEY` на длинную случайную строку, например:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(64))"
+```
+
+Сроки жизни токенов задаются в `.env`: `ACCESS_TOKEN_TTL_MINUTES=15` и
+`REFRESH_TOKEN_TTL_DAYS=7`.
 
 3. Создать виртуальное окружение и установить зависимости:
 
@@ -220,11 +262,19 @@ uvicorn app.main:app --reload
 
 ### Основные эндпоинты
 
-- `GET/POST /api/persons`, `GET/PATCH/DELETE /api/persons/{id}`
+- `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/refresh` — публичные
+- `POST /api/auth/logout`, `GET /api/auth/me` — требуют access-токен
+- `GET/POST /api/persons`, `GET/PATCH/DELETE /api/persons/{id}` (изменения — только старший)
 - `GET/POST /api/shifts` (фильтр `?month=YYYY-MM`), `GET/PATCH/DELETE /api/shifts/{id}`
+  (изменения — только старший)
 - `GET/POST /api/requests` (фильтр `?request_status=`), `GET/DELETE /api/requests/{id}`,
-  `POST /api/requests/{id}/approve`, `POST /api/requests/{id}/decline`
+  `POST /api/requests/{id}/approve`, `POST /api/requests/{id}/decline` (модерация — только старший)
 - `GET /api/history`, `GET /api/history/{id}`
+- `GET /api/health` — публичная проверка доступности
+
+Доменные эндпоинты принимают заголовок `Authorization: Bearer <access-token>`.
+В Swagger UI токен можно получить через `/api/auth/login` и вставить кнопкой
+«Authorize».
 
 ## Тесты
 
@@ -235,7 +285,10 @@ pytest
 ```
 
 Тесты используют отдельную базу `shift_exchange_test` (создаётся автоматически)
-и покрывают CRUD, ошибки (404/400/422) и полный сценарий обмена с подтверждением.
+и покрывают Argon2id-хеши, регистрацию и вход, сроки и ротацию refresh-токенов,
+отзыв токена при logout, отклонение неверных/истёкших токенов, защиту маршрутов,
+разграничение доступа дежурного и старшего, а также полный сценарий обмена
+с подтверждением.
 
 ## Запуск frontend
 

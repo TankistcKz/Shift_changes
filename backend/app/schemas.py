@@ -4,16 +4,32 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 TIME_PATTERN = r"^\d{2}:\d{2}$"
+LOGIN_PATTERN = r"^[a-zA-Z0-9_.-]+$"
 
 
-class PersonCreate(BaseModel):
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    login: str = Field(min_length=3, max_length=50, pattern=LOGIN_PATTERN)
+    password: str = Field(min_length=8, max_length=128)
     name: str = Field(min_length=1, max_length=100)
-    role: Literal["senior", "guard"] = "guard"
 
 
-class PersonUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=100)
-    role: Literal["senior", "guard"] | None = None
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    login: str = Field(min_length=1, max_length=50)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class RefreshTokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    refresh_token: str = Field(min_length=1, max_length=500)
+
+
+class LogoutRequest(RefreshTokenRequest):
+    pass
 
 
 class PersonOut(BaseModel):
@@ -24,7 +40,42 @@ class PersonOut(BaseModel):
     role: str
 
 
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    login: str
+    person_id: int
+    is_active: bool
+    person: PersonOut
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+    refresh_expires_in: int
+    user: UserOut
+
+
+class PersonCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    role: Literal["senior", "guard"] = "guard"
+
+
+class PersonUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    role: Literal["senior", "guard"] | None = None
+
+
 class ShiftCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     date: date
     start_time: str = Field(pattern=TIME_PATTERN)
     end_time: str = Field(pattern=TIME_PATTERN)
@@ -32,6 +83,8 @@ class ShiftCreate(BaseModel):
 
 
 class ShiftUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     start_time: str | None = Field(default=None, pattern=TIME_PATTERN)
     end_time: str | None = Field(default=None, pattern=TIME_PATTERN)
     person_id: int | None = None
@@ -49,7 +102,8 @@ class ShiftOut(BaseModel):
 
 
 class ExchangeRequestCreate(BaseModel):
-    requester_id: int
+    model_config = ConfigDict(extra="forbid")
+
     shift_id: int
     target_shift_id: int
     reason: str = Field(min_length=1, max_length=500)
@@ -68,10 +122,6 @@ class ExchangeRequestOut(BaseModel):
     requester: PersonOut | None = None
     shift: ShiftOut | None = None
     target_shift: ShiftOut | None = None
-
-
-class ModerationAction(BaseModel):
-    approved_by_id: int | None = None
 
 
 class ReplacementRecordOut(BaseModel):

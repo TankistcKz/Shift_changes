@@ -11,9 +11,14 @@ class Settings(BaseSettings):
     )
 
     database_url: str = (
-        "postgresql+psycopg://shift:change_me@localhost:5432/shift_exchange"
+        "postgresql+psycopg://shift:shift@localhost:5432/shift_exchange"
     )
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+    jwt_secret_key: str = "change_me_generate_a_long_random_string"
+    jwt_algorithm: str = "HS256"
+    access_token_ttl_minutes: int = 15
+    refresh_token_ttl_days: int = 7
 
 
 @lru_cache

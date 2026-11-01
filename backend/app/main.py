@@ -2,14 +2,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routers import history, persons, requests, shifts
+from .routers import auth, history, persons, requests, shifts
 
 settings = get_settings()
 
 app = FastAPI(
     title="Обмен сменами дежурств",
-    description="Backend: график, запросы обмена, подтверждение старшими, история замен",
-    version="0.2.0",
+    description=(
+        "Backend: аутентификация, график, запросы обмена, "
+        "подтверждение старшими, история замен"
+    ),
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -20,6 +23,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(persons.router)
 app.include_router(shifts.router)
 app.include_router(requests.router)
