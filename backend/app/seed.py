@@ -115,6 +115,34 @@ def _ensure_demo_users(
     return created
 
 
+def _ensure_current_month_shifts(db: Session, guards: list[Person]) -> int:
+    """Добавляет отсутствующие смены текущего месяца при повторном seed."""
+    if not guards:
+        return 0
+
+    now = datetime.now()
+    first_day = datetime(now.year, now.month, 1).date()
+    next_month = (now.month % 12) + 1
+    next_year = now.year + (1 if now.month == 12 else 0)
+    first_day_next = datetime(next_year, next_month, 1).date()
+
+    existing_dates = set(
+        db.scalars(
+            select(Shift.date).where(
+                Shift.date >= first_day,
+                Shift.date < first_day_next,
+            )
+        )
+    )
+    missing = [
+        shift
+        for shift in build_shifts(now.year, now.month, guards)
+        if shift.date not in existing_dates
+    ]
+    db.add_all(missing)
+    return len(missing)
+
+
 def seed() -> None:
     _check_tables()
     db: Session = SessionLocal()
@@ -125,10 +153,14 @@ def seed() -> None:
             created = _ensure_demo_users(
                 db, {person.name: person for person in persons}
             )
+            added_shifts = _ensure_current_month_shifts(
+                db, [person for person in persons if person.role == "guard"]
+            )
             db.commit()
             print(
                 "База уже заполнена, добавлено демо-аккаунтов: "
-                f"{created}. Пароль демо-аккаунтов: {DEMO_PASSWORD}"
+                f"{created}, смен текущего месяца: {added_shifts}. "
+                f"Пароль демо-аккаунтов: {DEMO_PASSWORD}"
             )
             return
 

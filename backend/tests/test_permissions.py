@@ -216,6 +216,28 @@ def test_guard_cannot_request_exchange_for_foreign_shift(
     assert senior_attempt.status_code == 403
 
 
+def test_senior_can_update_shift_date(
+    client, account_factory, shift_factory, login
+):
+    _senior, _guard, _other, guard_shift, _other_shift = setup_people(
+        account_factory, shift_factory
+    )
+    senior_headers = bearer(login("senior"))
+
+    updated = client.patch(
+        f"/api/shifts/{guard_shift.id}",
+        headers=senior_headers,
+        json={"date": "2026-02-20"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["date"] == "2026-02-20"
+
+    fetched = client.get(
+        f"/api/shifts/{guard_shift.id}", headers=senior_headers
+    )
+    assert fetched.json()["date"] == "2026-02-20"
+
+
 def test_guard_can_delete_own_request(
     client, account_factory, shift_factory, login
 ):

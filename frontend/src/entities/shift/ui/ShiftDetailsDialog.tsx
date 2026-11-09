@@ -15,10 +15,22 @@ import type { Shift } from '../model/types';
 interface ShiftDetailsDialogProps {
   shift: Shift | null;
   person?: Person;
+  canManage?: boolean;
+  canRequestExchange?: boolean;
+  onEdit?: () => void;
+  onDelete?: () => void;
   onClose: () => void;
 }
 
-export default function ShiftDetailsDialog({ shift, person, onClose }: ShiftDetailsDialogProps) {
+export default function ShiftDetailsDialog({
+  shift,
+  person,
+  canManage = false,
+  canRequestExchange = false,
+  onEdit,
+  onDelete,
+  onClose,
+}: ShiftDetailsDialogProps) {
   return (
     <Dialog
       open={shift !== null}
@@ -42,13 +54,21 @@ export default function ShiftDetailsDialog({ shift, person, onClose }: ShiftDeta
             <Typography variant="caption" color="text.secondary">
               Смена #{shift.id}
             </Typography>
-            <Box>
-              <Link to="/requests">Предложить обмен этой смены</Link>
-            </Box>
+            {canRequestExchange && (
+              <Box>
+                <Link to="/requests">Предложить обмен этой смены</Link>
+              </Box>
+            )}
           </Stack>
         )}
       </DialogContent>
       <DialogActions>
+        {canManage && onDelete && (
+          <Button color="error" onClick={onDelete}>
+            Удалить
+          </Button>
+        )}
+        {canManage && onEdit && <Button onClick={onEdit}>Редактировать</Button>}
         <Button onClick={onClose}>Закрыть</Button>
       </DialogActions>
     </Dialog>

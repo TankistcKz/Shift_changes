@@ -89,7 +89,7 @@ export default function RequestCard({
           </Typography>
         </CardContent>
 
-        <Collapse in={request.status === 'pending' && Boolean(actions)} timeout={250} unmountOnExit>
+        <Collapse in={Boolean(actions)} timeout={250} unmountOnExit>
           <Box>
             <Divider />
             <CardActions sx={{ px: 2, py: 1.5 }}>{actions}</CardActions>

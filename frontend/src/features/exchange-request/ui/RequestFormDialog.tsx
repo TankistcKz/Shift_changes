@@ -50,6 +50,7 @@ export default function RequestFormDialog({
     touched,
     submitting,
     submitAttempted,
+    submitError,
     setField,
     handleBlur,
     handleSubmit,
@@ -69,7 +70,9 @@ export default function RequestFormDialog({
 
   const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void handleSubmit();
+    void handleSubmit().catch(() => {
+      // Ошибка уже показана в форме.
+    });
   };
 
   return (
@@ -91,6 +94,10 @@ export default function RequestFormDialog({
           <Stack spacing={2}>
             <Collapse in={submitAttempted && hasErrors} timeout={200}>
               <Alert severity="error">Проверьте выделенные поля формы.</Alert>
+            </Collapse>
+
+            <Collapse in={Boolean(submitError)} timeout={200} unmountOnExit>
+              <Alert severity="error">{submitError}</Alert>
             </Collapse>
 
             <FormControl fullWidth error={Boolean(shiftError)}>

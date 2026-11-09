@@ -1,98 +1,209 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from 'react';
 import type { ReactNode } from 'react';
 import type { ExchangeRequestDraft } from '../../features/exchange-request/model/types';
-import { delay, fetchAppData, setMockFailure } from '../../shared/api/mockApi';
-import type { AppDataState } from './appDataReducer';
-import { appDataReducer, initialAppDataState } from './appDataReducer';
+import {
+  approveExchangeRequest,
+  createExchangeRequest,
+  createPerson,
+  createShift,
+  declineExchangeRequest,
+  deleteExchangeRequest,
+  deletePerson,
+  deleteShift,
+  fetchAppData,
+  updatePerson,
+  updateShift,
+} from '../../shared/api/appApi';
+import type { PersonInput, ShiftInput } from '../../shared/api/appApi';
+import {
+  appDataReducer,
+  initialAppDataState,
+} from './appDataReducer';
+import type { AppDataState, PendingRequest } from './appDataReducer';
+import { useSession } from './SessionProvider';
 
-interface AppDataContextValue extends AppDataState {
-  simulateError: boolean;
+interface AppDataContextValue {
+  persons: AppDataState['persons'];
+  shifts: AppDataState['shifts'];
+  requests: AppDataState['requests'];
+  history: AppDataState['history'];
+  loading: boolean;
+  error: string | null;
+  pendingRequest: PendingRequest | null;
   reload: () => Promise<void>;
-  createRequest: (draft: ExchangeRequestDraft, requesterId: number) => Promise<void>;
+  createRequest: (draft: ExchangeRequestDraft) => Promise<void>;
   approveRequest: (id: number) => Promise<void>;
   declineRequest: (id: number) => Promise<void>;
-  toggleSimulateError: () => void;
+  deleteRequest: (id: number) => Promise<void>;
+  createPerson: (input: PersonInput) => Promise<void>;
+  updatePerson: (id: number, input: PersonInput) => Promise<void>;
+  deletePerson: (id: number) => Promise<void>;
+  createShift: (input: ShiftInput) => Promise<void>;
+  updateShift: (id: number, input: ShiftInput) => Promise<void>;
+  deleteShift: (id: number) => Promise<void>;
 }
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
 
-export function AppDataProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(appDataReducer, initialAppDataState);
-  const [simulateError, setSimulateError] = useState(false);
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Неизвестная ошибка';
+}
 
-  const reload = useCallback(async () => {
-    dispatch({ type: 'load/start' });
+export function AppDataProvider({ children }: { children: ReactNode }) {
+  const { currentUserId } = useSession();
+  const [state, dispatch] = useReducer(appDataReducer, initialAppDataState);
+
+  const load = useCallback(async (showLoading: boolean) => {
+    if (showLoading) dispatch({ type: 'load/start' });
     try {
       const data = await fetchAppData();
       dispatch({ type: 'load/success', payload: data });
     } catch (error) {
-      dispatch({
-        type: 'load/error',
-        payload: error instanceof Error ? error.message : 'Неизвестная ошибка',
-      });
+      dispatch({ type: 'load/error', payload: toErrorMessage(error) });
     }
   }, []);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    if (currentUserId === null) {
+      dispatch({ type: 'load/reset' });
+      return;
+    }
+    void load(true);
+  }, [currentUserId, load]);
+
+  const refresh = useCallback(async () => {
+    const data = await fetchAppData();
+    dispatch({ type: 'load/success', payload: data });
+  }, []);
+
+  const reload = useCallback(async () => {
+    await load(true);
+  }, [load]);
 
   const createRequest = useCallback(
-    async (draft: ExchangeRequestDraft, requesterId: number) => {
-      await delay(450);
-      dispatch({
-        type: 'request/create',
-        payload: { ...draft, requesterId },
-      });
+    async (draft: ExchangeRequestDraft) => {
+      await createExchangeRequest(draft);
+      await refresh();
     },
-    [],
+    [refresh],
   );
 
-  const approveRequest = useCallback(async (id: number) => {
-    dispatch({ type: 'request/pending', payload: { id, action: 'approve' } });
-    try {
-      await delay(550);
-      dispatch({ type: 'request/approve', payload: { id } });
-    } finally {
-      dispatch({ type: 'request/pending', payload: null });
-    }
-  }, []);
+  const approveRequest = useCallback(
+    async (id: number) => {
+      dispatch({ type: 'request/pending', payload: { id, action: 'approve' } });
+      try {
+        await approveExchangeRequest(id);
+        await refresh();
+      } finally {
+        dispatch({ type: 'request/pending', payload: null });
+      }
+    },
+    [refresh],
+  );
 
-  const declineRequest = useCallback(async (id: number) => {
-    dispatch({ type: 'request/pending', payload: { id, action: 'decline' } });
-    try {
-      await delay(450);
-      dispatch({ type: 'request/decline', payload: { id } });
-    } finally {
-      dispatch({ type: 'request/pending', payload: null });
-    }
-  }, []);
+  const declineRequest = useCallback(
+    async (id: number) => {
+      dispatch({ type: 'request/pending', payload: { id, action: 'decline' } });
+      try {
+        await declineExchangeRequest(id);
+        await refresh();
+      } finally {
+        dispatch({ type: 'request/pending', payload: null });
+      }
+    },
+    [refresh],
+  );
 
-  const toggleSimulateError = useCallback(() => {
-    const next = !simulateError;
-    setSimulateError(next);
-    setMockFailure(next);
-    void reload();
-  }, [simulateError, reload]);
+  const deleteRequest = useCallback(
+    async (id: number) => {
+      await deleteExchangeRequest(id);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const createPersonAction = useCallback(
+    async (input: PersonInput) => {
+      await createPerson(input);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const updatePersonAction = useCallback(
+    async (id: number, input: PersonInput) => {
+      await updatePerson(id, input);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const deletePersonAction = useCallback(
+    async (id: number) => {
+      await deletePerson(id);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const createShiftAction = useCallback(
+    async (input: ShiftInput) => {
+      await createShift(input);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const updateShiftAction = useCallback(
+    async (id: number, input: ShiftInput) => {
+      await updateShift(id, input);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const deleteShiftAction = useCallback(
+    async (id: number) => {
+      await deleteShift(id);
+      await refresh();
+    },
+    [refresh],
+  );
 
   const value = useMemo<AppDataContextValue>(
     () => ({
-      ...state,
-      simulateError,
+      persons: state.persons,
+      shifts: state.shifts,
+      requests: state.requests,
+      history: state.history,
+      loading: state.loading,
+      error: state.error,
+      pendingRequest: state.pendingRequest,
       reload,
       createRequest,
       approveRequest,
       declineRequest,
-      toggleSimulateError,
+      deleteRequest,
+      createPerson: createPersonAction,
+      updatePerson: updatePersonAction,
+      deletePerson: deletePersonAction,
+      createShift: createShiftAction,
+      updateShift: updateShiftAction,
+      deleteShift: deleteShiftAction,
     }),
     [
       state,
-      simulateError,
       reload,
       createRequest,
       approveRequest,
       declineRequest,
-      toggleSimulateError,
+      deleteRequest,
+      createPersonAction,
+      updatePersonAction,
+      deletePersonAction,
+      createShiftAction,
+      updateShiftAction,
+      deleteShiftAction,
     ],
   );
 

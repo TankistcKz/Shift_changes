@@ -130,6 +130,8 @@ def update_shift(db: Session, shift_id: int, data: ShiftUpdate) -> Shift:
         shift.start_time = data.start_time
     if data.end_time is not None:
         shift.end_time = data.end_time
+    if data.date is not None:
+        shift.date = data.date
     db.commit()
     db.refresh(shift)
     return shift

@@ -8,14 +8,12 @@ import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
 import Fade from '@mui/material/Fade';
-import FormControlLabel from '@mui/material/FormControlLabel';
 import IconButton from '@mui/material/IconButton';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
-import Switch from '@mui/material/Switch';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
@@ -25,8 +23,6 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import HistoryIcon from '@mui/icons-material/History';
 import GroupIcon from '@mui/icons-material/Group';
 import LogoutIcon from '@mui/icons-material/Logout';
-import { findPerson } from '../entities/person/model/selectors';
-import { useAppData } from './providers/AppDataProvider';
 import { useSession } from './providers/SessionProvider';
 
 const drawerWidth = 260;
@@ -45,12 +41,10 @@ interface DrawerContentProps {
 function DrawerContent({ onNavigate }: DrawerContentProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { persons, simulateError, toggleSimulateError } = useAppData();
-  const { currentUserId, logout } = useSession();
-  const currentUser = currentUserId === null ? undefined : findPerson(persons, currentUserId);
+  const { currentUser, logout } = useSession();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     onNavigate?.();
     navigate('/login', { replace: true });
   };
@@ -104,20 +98,13 @@ function DrawerContent({ onNavigate }: DrawerContentProps) {
           size="small"
           fullWidth
           startIcon={<LogoutIcon />}
-          onClick={handleLogout}
+          onClick={() => {
+            void handleLogout();
+          }}
           sx={{ mt: 1, justifyContent: 'flex-start', px: 1 }}
         >
           Выйти
         </Button>
-        <Divider sx={{ my: 1.5 }} />
-        <FormControlLabel
-          control={<Switch size="small" checked={simulateError} onChange={toggleSimulateError} />}
-          label={
-            <Typography variant="body2" color="text.secondary">
-              Демо: ошибка API
-            </Typography>
-          }
-        />
       </Box>
     </Box>
   );

@@ -28,6 +28,7 @@ export interface UseRequestFormResult {
   touched: Partial<Record<ExchangeRequestFormField, boolean>>;
   submitting: boolean;
   submitAttempted: boolean;
+  submitError: string | null;
   setField: (field: ExchangeRequestFormField, value: string) => void;
   handleBlur: (field: ExchangeRequestFormField) => void;
   handleSubmit: () => Promise<void>;
@@ -43,6 +44,7 @@ export function useRequestForm({
   const [touched, setTouched] = useState<Partial<Record<ExchangeRequestFormField, boolean>>>({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const context = useMemo<ValidationContext>(() => {
     const myShiftIds = shifts
@@ -62,10 +64,12 @@ export function useRequestForm({
     setTouched({});
     setSubmitAttempted(false);
     setSubmitting(false);
+    setSubmitError(null);
   }, [open]);
 
   const setField = useCallback((field: ExchangeRequestFormField, value: string) => {
     setValues((prev) => ({ ...prev, [field]: value }));
+    setSubmitError(null);
   }, []);
 
   const handleBlur = useCallback((field: ExchangeRequestFormField) => {
@@ -81,12 +85,18 @@ export function useRequestForm({
     if (Object.keys(errors).length > 0) return;
 
     setSubmitting(true);
+    setSubmitError(null);
     try {
       await onSubmit({
         shiftId: Number(values.shiftId),
         targetShiftId: Number(values.targetShiftId),
         reason: values.reason.trim(),
       });
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error ? error.message : 'Не удалось отправить запрос',
+      );
+      throw error;
     } finally {
       setSubmitting(false);
     }
@@ -98,6 +108,7 @@ export function useRequestForm({
     touched,
     submitting,
     submitAttempted,
+    submitError,
     setField,
     handleBlur,
     handleSubmit,

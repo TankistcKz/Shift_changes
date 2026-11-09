@@ -1,24 +1,28 @@
 import { useState } from 'react';
 import AddIcon from '@mui/icons-material/Add';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import Alert from '@mui/material/Alert';
 import type { AlertColor } from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import Fade from '@mui/material/Fade';
+import IconButton from '@mui/material/IconButton';
 import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
+import Tooltip from '@mui/material/Tooltip';
 import { useAppData } from '../../app/providers/AppDataProvider';
 import { useSession } from '../../app/providers/SessionProvider';
-import type { RequestStatus } from '../../entities/exchange-request/model/types';
+import type { ExchangeRequest, RequestStatus } from '../../entities/exchange-request/model/types';
 import RequestCard from '../../entities/exchange-request/ui/RequestCard';
 import { findPerson } from '../../entities/person/model/selectors';
 import { findShift } from '../../entities/shift/model/selectors';
 import type { ExchangeRequestDraft } from '../../features/exchange-request/model/types';
 import RequestFormDialog from '../../features/exchange-request/ui/RequestFormDialog';
 import ModerationButtons from '../../features/moderate-request/ui/ModerationButtons';
+import ConfirmDialog from '../../shared/ui/ConfirmDialog';
 import EmptyState from '../../shared/ui/EmptyState';
 import ErrorState from '../../shared/ui/ErrorState';
 import PageHeader from '../../shared/ui/PageHeader';
@@ -42,13 +46,17 @@ export default function RequestsPage() {
     createRequest,
     approveRequest,
     declineRequest,
+    deleteRequest,
     pendingRequest,
   } = useAppData();
 
-  const { currentUserId } = useSession();
+  const { currentUser } = useSession();
+  const currentUserId = currentUser?.personId ?? null;
 
   const [filter, setFilter] = useState<Filter>('all');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ExchangeRequest | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
   const counts: Record<Filter, number> = {
@@ -61,29 +69,69 @@ export default function RequestsPage() {
   const filtered =
     filter === 'all' ? requests : requests.filter((request) => request.status === filter);
 
-  const currentUser =
-    currentUserId === null ? undefined : findPerson(persons, currentUserId);
   const currentUserName = currentUser?.name ?? 'сотрудник';
   const isSenior = currentUser?.role === 'senior';
   const canCreate = currentUser?.role === 'guard';
   const approverName = persons.find((person) => person.role === 'senior')?.name ?? 'Старший';
 
   const handleApprove = async (id: number) => {
-    await approveRequest(id);
-    setNotice({ message: 'Запрос подтверждён: смены в графике обновлены.', severity: 'success' });
+    try {
+      await approveRequest(id);
+      setNotice({
+        message: 'Запрос подтверждён: смены в графике обновлены.',
+        severity: 'success',
+      });
+    } catch (mutationError) {
+      setNotice({
+        message:
+          mutationError instanceof Error
+            ? mutationError.message
+            : 'Не удалось подтвердить запрос',
+        severity: 'error',
+      });
+    }
   };
 
   const handleDecline = async (id: number) => {
-    await declineRequest(id);
-    setNotice({ message: 'Запрос отклонён.', severity: 'info' });
+    try {
+      await declineRequest(id);
+      setNotice({ message: 'Запрос отклонён.', severity: 'info' });
+    } catch (mutationError) {
+      setNotice({
+        message:
+          mutationError instanceof Error
+            ? mutationError.message
+            : 'Не удалось отклонить запрос',
+        severity: 'error',
+      });
+    }
   };
 
   const handleCreate = async (draft: ExchangeRequestDraft) => {
-    if (!canCreate || currentUserId === null) return;
-    await createRequest(draft, currentUserId);
+    await createRequest(draft);
     setDialogOpen(false);
     setFilter('pending');
     setNotice({ message: 'Запрос на обмен отправлен старшему.', severity: 'success' });
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deleteRequest(deleteTarget.id);
+      setDeleteTarget(null);
+      setNotice({ message: 'Запрос удалён.', severity: 'success' });
+    } catch (mutationError) {
+      setNotice({
+        message:
+          mutationError instanceof Error
+            ? mutationError.message
+            : 'Не удалось удалить запрос',
+        severity: 'error',
+      });
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -192,6 +240,8 @@ export default function RequestsPage() {
 
                   const pendingAction =
                     pendingRequest?.id === request.id ? pendingRequest.action : null;
+                  const isMine = request.requesterId === currentUserId;
+                  const canDelete = isMine || isSenior;
 
                   return (
                     <RequestCard
@@ -202,20 +252,42 @@ export default function RequestsPage() {
                       targetShift={targetShift}
                       targetPerson={targetPerson}
                       approverName={approverName}
-                      isMine={request.requesterId === currentUserId}
+                      isMine={isMine}
                       canModerate={isSenior}
                       actions={
-                        request.status === 'pending' && isSenior ? (
-                          <ModerationButtons
-                            pendingAction={pendingAction}
-                            onApprove={() => {
-                              void handleApprove(request.id);
-                            }}
-                            onDecline={() => {
-                              void handleDecline(request.id);
-                            }}
-                          />
-                        ) : undefined
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          alignItems="center"
+                          useFlexGap
+                          flexWrap="wrap"
+                          sx={{ width: '100%' }}
+                        >
+                          {request.status === 'pending' && isSenior && (
+                            <ModerationButtons
+                              pendingAction={pendingAction}
+                              onApprove={() => {
+                                void handleApprove(request.id);
+                              }}
+                              onDecline={() => {
+                                void handleDecline(request.id);
+                              }}
+                            />
+                          )}
+                          {canDelete && (
+                            <Tooltip title="Удалить запрос">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                aria-label="Удалить запрос"
+                                onClick={() => setDeleteTarget(request)}
+                                sx={{ ml: 'auto' }}
+                              >
+                                <DeleteOutlineIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </Stack>
                       }
                     />
                   );
@@ -237,9 +309,20 @@ export default function RequestsPage() {
         />
       )}
 
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Удалить запрос?"
+        message="Запрос будет удалён без возможности восстановления. Смены в графике не изменятся."
+        busy={deleting}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          void handleDelete();
+        }}
+      />
+
       <Snackbar
         open={notice !== null}
-        autoHideDuration={4000}
+        autoHideDuration={5000}
         onClose={() => setNotice(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >

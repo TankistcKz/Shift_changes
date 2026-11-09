@@ -1,52 +1,74 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-
-const STORAGE_KEY = 'shift-exchange.currentUserId';
+import {
+  authenticate,
+  logout as apiLogout,
+  register as apiRegister,
+} from '../../features/auth/api/authApi';
+import type { RegisterInput } from '../../features/auth/api/authApi';
+import { setUnauthorizedHandler } from '../../shared/api/http';
+import {
+  clearStoredSession,
+  getStoredSession,
+  setStoredSession,
+} from '../../shared/api/tokenStorage';
+import type { AuthSession, AuthUser } from '../../shared/api/types';
 
 interface SessionContextValue {
   currentUserId: number | null;
-  login: (personId: number) => void;
-  logout: () => void;
+  currentUser: AuthUser | null;
+  login: (login: string, password: string) => Promise<void>;
+  register: (input: RegisterInput) => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
-function readStoredUserId(): number | null {
-  try {
-    const rawValue = localStorage.getItem(STORAGE_KEY);
-    if (!rawValue) return null;
-    const personId = Number(rawValue);
-    return Number.isInteger(personId) && personId > 0 ? personId : null;
-  } catch {
-    return null;
-  }
-}
-
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [currentUserId, setCurrentUserId] = useState<number | null>(readStoredUserId);
+  const [session, setSession] = useState<AuthSession | null>(getStoredSession);
 
-  const login = useCallback((personId: number) => {
-    setCurrentUserId(personId);
-    try {
-      localStorage.setItem(STORAGE_KEY, String(personId));
-    } catch {
-      // localStorage может быть недоступен (например, в приватном режиме).
-      // В этом случае сессия продолжит работать до перезагрузки страницы.
-    }
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      clearStoredSession();
+      setSession(null);
+    });
+    return () => setUnauthorizedHandler(null);
   }, []);
 
-  const logout = useCallback(() => {
-    setCurrentUserId(null);
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // См. комментарий в login.
-    }
+  const login = useCallback(async (loginValue: string, password: string) => {
+    const nextSession = await authenticate(loginValue, password);
+    setStoredSession(nextSession);
+    setSession(nextSession);
   }, []);
 
-  const value = useMemo(
-    () => ({ currentUserId, login, logout }),
-    [currentUserId, login, logout],
+  const register = useCallback(async (input: RegisterInput) => {
+    const nextSession = await apiRegister(input);
+    setStoredSession(nextSession);
+    setSession(nextSession);
+  }, []);
+
+  const logout = useCallback(async () => {
+    const currentSession = getStoredSession();
+    if (currentSession) {
+      try {
+        await apiLogout(currentSession.refreshToken);
+      } catch {
+        // Даже если backend недоступен, локальную сессию нужно завершить.
+      }
+    }
+    clearStoredSession();
+    setSession(null);
+  }, []);
+
+  const value = useMemo<SessionContextValue>(
+    () => ({
+      currentUserId: session?.user.personId ?? null,
+      currentUser: session?.user ?? null,
+      login,
+      register,
+      logout,
+    }),
+    [session, login, register, logout],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

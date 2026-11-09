@@ -1,4 +1,5 @@
-from datetime import date, datetime
+from datetime import date as DateType
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -76,7 +77,7 @@ class PersonUpdate(BaseModel):
 class ShiftCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    date: date
+    date: DateType
     start_time: str = Field(pattern=TIME_PATTERN)
     end_time: str = Field(pattern=TIME_PATTERN)
     person_id: int
@@ -85,6 +86,7 @@ class ShiftCreate(BaseModel):
 class ShiftUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    date: DateType | None = None
     start_time: str | None = Field(default=None, pattern=TIME_PATTERN)
     end_time: str | None = Field(default=None, pattern=TIME_PATTERN)
     person_id: int | None = None
@@ -94,7 +96,7 @@ class ShiftOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    date: date
+    date: DateType
     start_time: str
     end_time: str
     person_id: int
